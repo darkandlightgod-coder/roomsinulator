@@ -449,7 +449,21 @@
             
             if(type === 'cabinet') {
                 const cabId = 'cab_' + Date.now();
-                const cabHtml = buildCabinetHtml(cabId, '新櫃體', 70, 24, 0);
+                // 新增空櫃體時，自帶一個 65cm 基礎底層，以防高度為 0 無法渲染
+                const cabHtml = `
+                    <div class="cabinet-group flex flex-col bg-[#2a2a2a] border-x-[10px] border-t-[10px] border-[#5c4033] h-full shrink-0 relative group" id="${cabId}" data-w="70" data-d="24" data-posx="0" data-posz="0" data-roty="0">
+                        <div class="cabinet-header w-full bg-[#3d2b1f] text-amber-500 font-bold text-xs md:text-sm text-center py-2 border-b-4 border-[#2a1d15] relative z-20 cursor-pointer hover:bg-[#4d3b2f]">
+                            <span class="cabinet-title-text">新櫃體</span> <span class="cab-dim-txt">(寬 70 / 深 24)</span>
+                            <button onclick="openAddShelf('${cabId}'); event.stopPropagation();" class="absolute left-2 top-2 text-emerald-400 hover:text-emerald-300 text-xs">+ 層板</button>
+                        </div>
+                        <div class="shelf-list flex flex-col flex-1 justify-end">
+                            <div class="shelf-container relative group border-b-[8px] border-[#8b5a2b]" style="height: ${65 * SCALE}px; width: ${70 * SCALE}px;">
+                                <div class="resize-handle" onmousedown="startResizeShelf(event, this)" ontouchstart="startResizeShelf(event, this)"></div>
+                                <div class="shelf-label absolute -top-[18px] left-1 text-[10px] text-amber-500/70 font-bold z-10 pointer-events-none">基礎底層 (高65)</div>
+                                <div class="dropzone shelf-bg w-full h-full" data-name="基礎底層" data-max-w="70" data-max-h="65" data-max-d="24"></div>
+                            </div>
+                        </div>
+                    </div>`;
                 getEl('cabinet-repository').innerHTML += cabHtml;
                 rebindAllEvents();
                 saveState(); refreshScene(); return;
@@ -463,17 +477,6 @@
 
             roomObjects.push({ id, type, name, w, h, d, x:0, y, z:0, rot:0, color, img:null });
             saveState(); refreshScene();
-        }
-
-        function buildCabinetHtml(id, title, w, d, posX) {
-            return `
-                <div class="cabinet-group flex flex-col bg-[#2a2a2a] border-x-[10px] border-t-[10px] border-[#5c4033] h-full shrink-0 relative group" id="${id}" data-w="${w}" data-d="${d}" data-posx="${posX}" data-posz="0" data-roty="0">
-                    <div class="cabinet-header w-full bg-[#3d2b1f] text-amber-500 font-bold text-xs md:text-sm text-center py-2 border-b-4 border-[#2a1d15] relative z-20 cursor-pointer hover:bg-[#4d3b2f]">
-                        <span class="cabinet-title-text">${title}</span> <span class="cab-dim-txt">(寬 ${w} / 深 ${d})</span>
-                        <button onclick="openAddShelf('${id}'); event.stopPropagation();" class="absolute left-2 top-2 text-emerald-400 hover:text-emerald-300 text-xs">+ 層板</button>
-                    </div>
-                    <div class="shelf-list flex flex-col flex-1 justify-end"></div>
-                </div>`;
         }
 
         // Room 2D Render
@@ -638,8 +641,8 @@
                 let mesh;
                 if(obj.type==='sofa') {
                     mesh = new THREE.Group();
-                    mesh.add(new THREE.Mesh(new THREE.BoxGeometry(obj.w, obj.h*0.4, obj.d), mat).translateY(-obj.h*0.3));
-                    mesh.add(new THREE.Mesh(new THREE.BoxGeometry(obj.w, obj.h, obj.d*0.2), mat).translateZ(-obj.d*0.4));
+                    const m1 = new THREE.Mesh(new THREE.BoxGeometry(obj.w, obj.h*0.4, obj.d), mat); m1.position.y = -obj.h*0.3; mesh.add(m1);
+                    const m2 = new THREE.Mesh(new THREE.BoxGeometry(obj.w, obj.h, obj.d*0.2), mat); m2.position.z = -obj.d*0.4; mesh.add(m2);
                 } else mesh = new THREE.Mesh(new THREE.BoxGeometry(obj.w, obj.h, obj.d), mat);
                 
                 mesh.position.set(obj.x, obj.y + obj.h/2, obj.z);
@@ -656,6 +659,7 @@
             });
         }
 
+        // --- 核心修正區：解決 .position.set() 的回傳值錯誤問題 ---
         function buildCabinetThreeMesh(cabEl, texLoader) {
             const w = parseFloat(cabEl.getAttribute('data-w')) || 70;
             const d = parseFloat(cabEl.getAttribute('data-d')) || 24;
@@ -669,13 +673,16 @@
 
             let totalH = 0;
             cabEl.querySelectorAll('.shelf-container').forEach(sh => { totalH += (parseFloat(sh.style.height) / SCALE) + wood; });
+            if (totalH === 0) totalH = 40; // 防呆機制，若無層板給予最低高度
 
             const group = new THREE.Group();
-            group.add(new THREE.Mesh(new THREE.BoxGeometry(wood, totalH, d), matWood).position.set(-w/2 - wood/2, totalH/2, 0));
-            group.add(new THREE.Mesh(new THREE.BoxGeometry(wood, totalH, d), matWood).position.set(w/2 + wood/2, totalH/2, 0));
-            group.add(new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, wood, d), matWood).position.set(0, totalH + wood/2, 0));
-            group.add(new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, wood, d), matWood).position.set(0, wood/2, 0));
-            group.add(new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, totalH + wood*2, wood), matWood).position.set(0, totalH/2 + wood/2, -d/2 - wood/2));
+            
+            // 修正：必須先建立 Mesh，設定 Position 後，再加入 Group (不能直接將 .position.set() 包在 add 裡面)
+            const m1 = new THREE.Mesh(new THREE.BoxGeometry(wood, totalH, d), matWood); m1.position.set(-w/2 - wood/2, totalH/2, 0); group.add(m1);
+            const m2 = new THREE.Mesh(new THREE.BoxGeometry(wood, totalH, d), matWood); m2.position.set(w/2 + wood/2, totalH/2, 0); group.add(m2);
+            const m3 = new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, wood, d), matWood); m3.position.set(0, totalH + wood/2, 0); group.add(m3);
+            const m4 = new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, wood, d), matWood); m4.position.set(0, wood/2, 0); group.add(m4);
+            const m5 = new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, totalH + wood*2, wood), matWood); m5.position.set(0, totalH/2 + wood/2, -d/2 - wood/2); group.add(m5);
 
             let curY = wood;
             const shelves = Array.from(cabEl.querySelectorAll('.shelf-container')).reverse();
@@ -686,7 +693,9 @@
                 const bgImg = dz.getAttribute('data-img');
                 
                 const sMat = bgImg ? new THREE.MeshStandardMaterial({ map: texLoader.load(bgImg) }) : matShelf;
-                group.add(new THREE.Mesh(new THREE.BoxGeometry(w, wood, d), sMat).position.set(0, curY + wood/2, 0));
+                const sMesh = new THREE.Mesh(new THREE.BoxGeometry(w, wood, d), sMat);
+                sMesh.position.set(0, curY + wood/2, 0);
+                group.add(sMesh);
                 
                 curY += wood;
                 let tX = -w/2, tZ = -d/2 + wood, rowMaxD = 0;
@@ -700,7 +709,10 @@
 
                     if (tX + tw > w/2) { tX = -w/2; tZ += rowMaxD + 1; rowMaxD = 0; }
                     const tMat = tImg ? new THREE.MeshStandardMaterial({ map: texLoader.load(tImg) }) : new THREE.MeshStandardMaterial({ color: new THREE.Color(c) });
-                    group.add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, td), tMat).position.set(tX + tw/2, curY + th/2, tZ + td/2));
+                    const tMesh = new THREE.Mesh(new THREE.BoxGeometry(tw, th, td), tMat);
+                    tMesh.position.set(tX + tw/2, curY + th/2, tZ + td/2);
+                    group.add(tMesh);
+                    
                     tX += tw + 1; rowMaxD = Math.max(rowMaxD, td);
                 });
                 curY += shH;
@@ -993,7 +1005,7 @@
             roomObjects[1].z = -150; roomObjects[2].z = -150; roomObjects[2].rot = 90; roomObjects[2].x = -150;
 
             const rep = getEl('cabinet-repository');
-            function bCab(id, n, w, d, posX) { const dV=document.createElement('div'); dV.innerHTML=buildCabinetHtml(id,n,w,d,posX).trim(); rep.appendChild(dV.firstChild); return getEl(id); }
+            function bCab(id, n, w, d, posX) { const dV=document.createElement('div'); dV.innerHTML= `<div class="cabinet-group flex flex-col bg-[#2a2a2a] border-x-[10px] border-t-[10px] border-[#5c4033] h-full shrink-0 relative group" id="${id}" data-w="${w}" data-d="${d}" data-posx="${posX}" data-posz="0" data-roty="0"><div class="cabinet-header w-full bg-[#3d2b1f] text-amber-500 font-bold text-xs md:text-sm text-center py-2 border-b-4 border-[#2a1d15] relative z-20 cursor-pointer hover:bg-[#4d3b2f]"><span class="cabinet-title-text">${n}</span> <span class="cab-dim-txt">(寬 ${w} / 深 ${d})</span><button onclick="openAddShelf('${id}'); event.stopPropagation();" class="absolute left-2 top-2 text-emerald-400 hover:text-emerald-300 text-xs">+ 層板</button></div><div class="shelf-list flex flex-col flex-1 justify-end"></div></div>`.trim(); rep.appendChild(dV.firstChild); return getEl(id); }
             function bSh(cEl, n, w, h, d) { const dV=document.createElement('div'); dV.innerHTML=`<div class="shelf-container relative group border-b-[8px] border-[#8b5a2b]" style="height: ${h*SCALE}px; width: ${w*SCALE}px;"><div class="resize-handle" onmousedown="startResizeShelf(event, this)" ontouchstart="startResizeShelf(event, this)"></div><div class="shelf-label absolute -top-[18px] left-1 text-[10px] text-amber-500/70 font-bold z-10 pointer-events-none">${n} (高${h})</div><div class="dropzone shelf-bg w-full h-full" data-name="${n}" data-max-w="${w}" data-max-h="${h}" data-max-d="${d}"></div></div>`; cEl.querySelector('.shelf-list').prepend(dV.firstChild); return cEl.querySelector('.shelf-container:first-child .dropzone'); }
             function iToy(z, n, w, h, d, c) { const dV=document.createElement('div'); dV.innerHTML=`<div class="toy-block rounded-sm flex items-center justify-center font-bold text-black text-[10px] overflow-hidden shadow-md text-center select-none" style="width: ${w*SCALE}px; height: ${h*SCALE}px; background-color: ${c};" draggable="true" data-name="${n}" data-w="${w}" data-h="${h}" data-d="${d}" data-color="${c}"><span class="text-content truncate px-1 pointer-events-none">${n}</span></div>`; z.appendChild(dV.firstChild); }
 
