@@ -24,7 +24,7 @@
         .tool-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
         .tool-btn svg { width: 24px; height: 24px; fill: currentColor; }
 
-        #sidebar { position: fixed; left: -350px; top: 0; height: 100%; width: 320px; max-width: 85vw; background: rgba(20, 15, 12, 0.95); backdrop-filter: blur(10px); z-index: 99998; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1); display: flex; flex-direction: column; border-right: 2px solid #3d2b1f; box-shadow: 5px 0 25px rgba(0,0,0,0.8); pt-16; }
+        #sidebar { position: fixed; left: -350px; top: 0; height: 100%; width: 320px; max-width: 85vw; background: rgba(20, 15, 12, 0.95); backdrop-filter: blur(10px); z-index: 99998; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1); display: flex; flex-direction: column; border-right: 2px solid #3d2b1f; box-shadow: 5px 0 25px rgba(0,0,0,0.8); padding-top: 70px; }
         #sidebar.open { left: 0; }
         #sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99997; display: none; backdrop-filter: blur(2px); }
         #sidebar.open ~ #sidebar-overlay { display: block; }
@@ -87,7 +87,7 @@
     <!-- 智慧型側邊欄 -->
     <div id="sidebar">
         <!-- 裝潢大宇宙專屬選單 -->
-        <div id="menu-room" class="flex flex-col h-full pt-16 px-4 pb-4">
+        <div id="menu-room" class="flex flex-col h-full px-4 pb-4">
             <h2 class="text-xl font-bold text-amber-500 mb-4 border-b border-gray-700 pb-2">🏠 裝潢模式選單</h2>
             <p class="text-xs text-gray-400 mb-4">💡 雙擊 2D/3D 中的櫃體可進入「系統櫃編輯維度」。雙擊家具可修改尺寸與材質。</p>
             
@@ -109,7 +109,7 @@
         </div>
 
         <!-- 系統櫃小宇宙專屬選單 -->
-        <div id="menu-cabinet" class="hidden flex-col h-full pt-16 px-4 pb-4">
+        <div id="menu-cabinet" class="hidden flex-col h-full px-4 pb-4">
             <h2 class="text-xl font-bold text-emerald-500 mb-2 border-b border-gray-700 pb-2">🛠️ 系統櫃編輯維度</h2>
             <p class="text-xs text-gray-400 mb-4">您正在編輯單一櫃體內部，所有更改將封裝為一個獨立元件。</p>
             
@@ -153,7 +153,7 @@
         <div id="cab-main-view">
             <!-- 2D 畫布 -->
             <div id="cab-canvas-container">
-                <div id="cabinet-canvas" class="flex gap-4 md:gap-8 items-end justify-center min-w-max pb-20 pt-10 px-4 min-h-full">
+                <div id="cabinet-canvas" class="flex gap-4 md:gap-8 items-end justify-center min-w-max pb-20 px-4 min-h-full">
                     <!-- Cabinet DOM injected here -->
                 </div>
             </div>
@@ -319,11 +319,13 @@
     <script>
         // --- 核心系統與狀態 ---
         let currentMode = 'ROOM'; // 'ROOM' | 'CABINET'
-        let editingCabId = null;  // 當前編輯的櫃體 ID
+        let editingCabId = null;  
         let historyStack = [], redoStack = [];
         
         let roomObjects = []; // 裝潢大宇宙的其他家具
         let nextObjId = 1;
+        const SCALE_2D = 4; // 1cm = 4px (ROOM 2D縮放)
+        const SCALE = 4;    // 1cm = 4px (CABINET 原生比例)
 
         // UI Helpers
         const getEl = id => document.getElementById(id);
@@ -398,7 +400,7 @@
             const cabEl = getEl(cabId);
             if(cabEl) getEl('cabinet-canvas').appendChild(cabEl);
             
-            getEl('sidebar').classList.add('open'); // 自動打開側邊欄看暫存區
+            if(!getEl('sidebar').classList.contains('open')) toggleSidebar();
             
             isCab3DMode = false; updateCabViewBtn();
             getEl('cab-canvas-container').style.display = 'block';
@@ -411,7 +413,6 @@
         function exitCabinetMode() {
             if(editingCabId) {
                 const cabEl = getEl(editingCabId);
-                // 放回隱藏庫
                 if(cabEl) getEl('cabinet-repository').appendChild(cabEl);
             }
             
@@ -439,10 +440,8 @@
         // =========================================================
         // 裝潢大宇宙 (ROOM) - 雙螢幕引擎
         // =========================================================
-        const SCALE_2D = 4;
         let roomScene, roomCamera, roomRenderer, roomControls, roomReqAnim, roomRaycaster, roomMouse = new THREE.Vector2();
         let zoom2D = 1, panX = 0, panY = 0;
-        let roomDraggables = [];
 
         function addRoomObj(type) {
             const id = 'r_' + nextObjId++;
@@ -450,7 +449,7 @@
             
             if(type === 'cabinet') {
                 const cabId = 'cab_' + Date.now();
-                const cabHtml = buildCabinetHtml(cabId, '新櫃體', 70, 24);
+                const cabHtml = buildCabinetHtml(cabId, '新櫃體', 70, 24, 0);
                 getEl('cabinet-repository').innerHTML += cabHtml;
                 rebindAllEvents();
                 saveState(); refreshScene(); return;
@@ -466,9 +465,9 @@
             saveState(); refreshScene();
         }
 
-        function buildCabinetHtml(id, title, w, d) {
+        function buildCabinetHtml(id, title, w, d, posX) {
             return `
-                <div class="cabinet-group flex flex-col bg-[#2a2a2a] border-x-[10px] border-t-[10px] border-[#5c4033] h-full shrink-0 relative group" id="${id}" data-w="${w}" data-d="${d}" data-posx="0" data-posz="0" data-roty="0">
+                <div class="cabinet-group flex flex-col bg-[#2a2a2a] border-x-[10px] border-t-[10px] border-[#5c4033] h-full shrink-0 relative group" id="${id}" data-w="${w}" data-d="${d}" data-posx="${posX}" data-posz="0" data-roty="0">
                     <div class="cabinet-header w-full bg-[#3d2b1f] text-amber-500 font-bold text-xs md:text-sm text-center py-2 border-b-4 border-[#2a1d15] relative z-20 cursor-pointer hover:bg-[#4d3b2f]">
                         <span class="cabinet-title-text">${title}</span> <span class="cab-dim-txt">(寬 ${w} / 深 ${d})</span>
                         <button onclick="openAddShelf('${id}'); event.stopPropagation();" class="absolute left-2 top-2 text-emerald-400 hover:text-emerald-300 text-xs">+ 層板</button>
@@ -477,13 +476,12 @@
                 </div>`;
         }
 
-        // Room 2D Render & Logic
+        // Room 2D Render
         function renderRoom2D() {
             const container = getEl('room-2d-canvas');
             const cam = getEl('room-cam-marker');
             container.innerHTML = ''; if(cam) container.appendChild(cam);
 
-            // 畫 Furniture
             roomObjects.forEach(obj => {
                 const div = document.createElement('div');
                 div.className = 'room-obj-2d';
@@ -493,15 +491,13 @@
                 div.style.backgroundColor = obj.img ? 'transparent' : obj.color;
                 if(obj.img) div.style.backgroundImage = `url(${obj.img})`;
                 div.innerHTML = `<span>${obj.name}</span>`;
-                
                 makeRoom2DDraggable(div, obj, null);
                 container.appendChild(div);
             });
 
-            // 畫 Cabinets (來自 Repository)
             getEl('cabinet-repository').childNodes.forEach(cabNode => {
                 if(cabNode.nodeType !== 1 || !cabNode.classList.contains('cabinet-group')) return;
-                const w = parseFloat(cabNode.getAttribute('data-w')) + 20; // 加上邊框粗度
+                const w = parseFloat(cabNode.getAttribute('data-w')) + 20; 
                 const d = parseFloat(cabNode.getAttribute('data-d')) + 10;
                 const x = parseFloat(cabNode.getAttribute('data-posx')) || 0;
                 const z = parseFloat(cabNode.getAttribute('data-posz')) || 0;
@@ -518,7 +514,6 @@
                 if(img) div.style.backgroundImage = `url(${img})`;
                 div.style.border = '2px solid #d97706';
                 div.innerHTML = `<span style="background:rgba(0,0,0,0.7);padding:2px 4px;border-radius:2px;">${title}</span>`;
-                
                 makeRoom2DDraggable(div, null, cabNode);
                 container.appendChild(div);
             });
@@ -526,36 +521,13 @@
 
         function makeRoom2DDraggable(div, roomObj, cabNode) {
             let isDrag = false, sx, sy, ox, oz, touchTimer = 0;
-            
             const handleDouble = (e) => {
                 e.stopPropagation();
                 if(cabNode) enterCabinetMode(cabNode.id);
                 else openRoomObjOptions(roomObj);
             };
 
-            // Touch support
-            div.addEventListener('touchstart', (e) => {
-                isDrag = true; sx = e.touches[0].clientX; sy = e.touches[0].clientY;
-                ox = parseFloat(div.style.left); oz = parseFloat(div.style.top);
-                if(roomControls) roomControls.enabled = false; e.stopPropagation();
-            }, {passive:true});
-            div.addEventListener('touchmove', (e) => {
-                if(!isDrag) return;
-                const nx = (ox + (e.touches[0].clientX - sx)/zoom2D)/SCALE_2D;
-                const nz = (oz + (e.touches[0].clientY - sy)/zoom2D)/SCALE_2D;
-                div.style.left = (nx*SCALE_2D)+'px'; div.style.top = (nz*SCALE_2D)+'px';
-                if(roomObj) { roomObj.x = nx; roomObj.z = nz; }
-                if(cabNode) { cabNode.setAttribute('data-posx', nx); cabNode.setAttribute('data-posz', nz); }
-                syncRoom3DObjPos(roomObj ? roomObj.id : cabNode.id, nx, nz);
-            }, {passive:true});
-            div.addEventListener('touchend', (e) => {
-                isDrag=false; if(roomControls) roomControls.enabled = true; saveState();
-                const now = Date.now(); if(now - touchTimer < 350) handleDouble(e); else touchTimer = now;
-            });
-
-            // Mouse support
             div.addEventListener('pointerdown', (e) => {
-                if(e.pointerType === 'touch') return;
                 isDrag=true; sx = e.clientX; sy = e.clientY;
                 ox = parseFloat(div.style.left); oz = parseFloat(div.style.top);
                 if(roomControls) roomControls.enabled = false; div.setPointerCapture(e.pointerId); e.stopPropagation();
@@ -570,13 +542,11 @@
                 syncRoom3DObjPos(roomObj ? roomObj.id : cabNode.id, nx, nz);
             });
             div.addEventListener('pointerup', (e) => {
-                if(e.pointerType === 'touch') return;
                 isDrag=false; if(roomControls) roomControls.enabled = true; saveState();
                 const now = Date.now(); if(now - touchTimer < 350) handleDouble(e); else touchTimer = now;
             });
         }
 
-        // Room 2D Viewport control
         let isRoomPan = false, pSx, pSy;
         document.addEventListener('pointerdown', e => {
             if(currentMode==='ROOM' && (e.target.id === 'room-2d-wrapper' || e.target.id === 'room-2d-canvas')) {
@@ -614,11 +584,9 @@
                 roomScene.add(new THREE.AmbientLight(0xffffff, 0.7));
                 const dir = new THREE.DirectionalLight(0xffffff, 0.8);
                 dir.position.set(300, 600, 400); dir.castShadow = true;
-                dir.shadow.camera.left = -500; dir.shadow.camera.right = 500; dir.shadow.camera.top = 500; dir.shadow.camera.bottom = -500;
                 roomScene.add(dir);
                 const grid = new THREE.GridHelper(2000, 100, 0x444444, 0x222222); grid.position.y = -0.1; roomScene.add(grid);
 
-                // 3D Double Click
                 let lastT = 0, tapStart = {x:0,y:0};
                 roomRenderer.domElement.addEventListener('pointerdown', e => tapStart = {x:e.clientX, y:e.clientY});
                 roomRenderer.domElement.addEventListener('pointerup', e => {
@@ -646,7 +614,6 @@
                     roomReqAnim = requestAnimationFrame(animRoom);
                     if(currentMode === 'ROOM') {
                         roomControls.update(); roomRenderer.render(roomScene, roomCamera);
-                        // Sync Camera Marker
                         const camM = getEl('room-cam-marker');
                         if(camM) {
                             camM.style.left = (roomCamera.position.x * SCALE_2D) + 'px';
@@ -663,12 +630,9 @@
             roomRenderer.setSize(container.clientWidth, container.clientHeight);
             roomCamera.aspect = container.clientWidth/container.clientHeight; roomCamera.updateProjectionMatrix();
 
-            // Clear Old
             roomScene.children.filter(c => c.type === 'Group' || c.type === 'Mesh' && c.userData.id).forEach(c => roomScene.remove(c));
-
             const texLoader = new THREE.TextureLoader();
 
-            // Render Furniture
             roomObjects.forEach(obj => {
                 const mat = obj.img ? new THREE.MeshStandardMaterial({map: texLoader.load(obj.img)}) : new THREE.MeshStandardMaterial({color: obj.color});
                 let mesh;
@@ -681,11 +645,9 @@
                 mesh.position.set(obj.x, obj.y + obj.h/2, obj.z);
                 mesh.rotation.y = THREE.MathUtils.degToRad(obj.rot||0);
                 mesh.userData = { id: obj.id, type: obj.type };
-                mesh.traverse(c=>{if(c.isMesh){c.castShadow=true;c.receiveShadow=true;}});
                 roomScene.add(mesh);
             });
 
-            // Render Cabinets from Repo
             getEl('cabinet-repository').childNodes.forEach(cabNode => {
                 if(cabNode.nodeType !== 1 || !cabNode.classList.contains('cabinet-group')) return;
                 const mesh = buildCabinetThreeMesh(cabNode, texLoader);
@@ -703,19 +665,17 @@
             const frameImg = cabEl.getAttribute('data-frame-img');
             const matWood = frameImg ? new THREE.MeshStandardMaterial({ map: texLoader.load(frameImg) }) : new THREE.MeshStandardMaterial({ color: 0x5c4033 });
             const matShelf = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
-            const wood = 2; // 板厚 (統一2cm避免過厚)
+            const wood = 2;
 
             let totalH = 0;
             cabEl.querySelectorAll('.shelf-container').forEach(sh => { totalH += (parseFloat(sh.style.height) / SCALE) + wood; });
 
             const group = new THREE.Group();
-            
-            // 外框
             group.add(new THREE.Mesh(new THREE.BoxGeometry(wood, totalH, d), matWood).position.set(-w/2 - wood/2, totalH/2, 0));
             group.add(new THREE.Mesh(new THREE.BoxGeometry(wood, totalH, d), matWood).position.set(w/2 + wood/2, totalH/2, 0));
             group.add(new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, wood, d), matWood).position.set(0, totalH + wood/2, 0));
             group.add(new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, wood, d), matWood).position.set(0, wood/2, 0));
-            group.add(new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, totalH + wood*2, wood), matWood).position.set(0, totalH/2 + wood/2, -d/2 - wood/2)); // 背板
+            group.add(new THREE.Mesh(new THREE.BoxGeometry(w + wood*2, totalH + wood*2, wood), matWood).position.set(0, totalH/2 + wood/2, -d/2 - wood/2));
 
             let curY = wood;
             const shelves = Array.from(cabEl.querySelectorAll('.shelf-container')).reverse();
@@ -741,7 +701,6 @@
                     if (tX + tw > w/2) { tX = -w/2; tZ += rowMaxD + 1; rowMaxD = 0; }
                     const tMat = tImg ? new THREE.MeshStandardMaterial({ map: texLoader.load(tImg) }) : new THREE.MeshStandardMaterial({ color: new THREE.Color(c) });
                     group.add(new THREE.Mesh(new THREE.BoxGeometry(tw, th, td), tMat).position.set(tX + tw/2, curY + th/2, tZ + td/2));
-                    
                     tX += tw + 1; rowMaxD = Math.max(rowMaxD, td);
                 });
                 curY += shH;
@@ -749,11 +708,11 @@
 
             group.position.set(x, 0, z);
             group.rotation.y = THREE.MathUtils.degToRad(rotY);
-            group.traverse(c=>{if(c.isMesh){c.castShadow=true;c.receiveShadow=true;}});
             return group;
         }
 
-        // --- Room Object Edit ---
+        // Room Object Settings
+        let activeObj = null;
         function openRoomObjOptions(obj) {
             activeObj = obj; getEl('room-obj-id').value = obj.id;
             getEl('room-obj-title').innerHTML = `<span>⚙️ 編輯 [${obj.name}]</span><button onclick="closeModal('room-obj-modal')" class="text-gray-500 hover:text-white">✕</button>`;
@@ -783,23 +742,23 @@
 
         function toggleCabViewMode() {
             isCab3DMode = !isCab3DMode;
-            updateCabViewBtn();
-            if(isCab3DMode) generateCab3D();
-        }
-        
-        function updateCabViewBtn() {
             const btn = getEl('btn-cab-view');
             if(isCab3DMode) {
                 getEl('cab-canvas-container').style.display = 'none'; getEl('cab-three-container').style.display = 'block';
                 btn.innerHTML = '🔙 返回 2D 編輯'; btn.classList.replace('bg-purple-600', 'bg-orange-600');
+                generateCab3D();
             } else {
                 getEl('cab-canvas-container').style.display = 'block'; getEl('cab-three-container').style.display = 'none';
                 btn.innerHTML = '🔄 切換 3D 預覽'; btn.classList.replace('bg-orange-600', 'bg-purple-600');
             }
         }
+        function updateCabViewBtn() {
+            const btn = getEl('btn-cab-view');
+            if(isCab3DMode) { btn.innerHTML = '🔙 返回 2D 編輯'; btn.classList.replace('bg-purple-600', 'bg-orange-600'); }
+            else { btn.innerHTML = '🔄 切換 3D 預覽'; btn.classList.replace('bg-orange-600', 'bg-purple-600'); }
+        }
 
         function rebindAllEvents() {
-            // Toys
             document.querySelectorAll('.toy-block').forEach(block => {
                 if (block.dataset.bound === 'true') return;
                 block.dataset.bound = 'true';
@@ -835,37 +794,22 @@
                     if (target) {
                         const dz = target.closest('.dropzone');
                         if (dz) { dz.classList.add('drag-over'); activeDropzone = dz; }
-                        else if (target.closest('#cab-three-container')) { activeDropzone = 'three'; } 
                     }
                 }, {passive: false});
 
                 block.addEventListener('touchend', (e) => {
                     let isDoubleTap = false; const now = Date.now(); const tapLen = now - (block.dataset.lastTap || 0);
-                    if (block.dataset.didMove !== 'true' && tapLen < 400 && tapLen > 0) { isDoubleTap = true; block.dataset.lastTap = 0; } 
-                    else block.dataset.lastTap = now;
-
+                    if (block.dataset.didMove !== 'true' && tapLen < 400 && tapLen > 0) { isDoubleTap = true; block.dataset.lastTap = 0; } else block.dataset.lastTap = now;
                     if (touchGhost) {
                         touchGhost.remove(); touchGhost = null; block.classList.remove('dragging');
                         document.querySelectorAll('.dropzone').forEach(dz => dz.classList.remove('drag-over'));
-                        
-                        if (activeDropzone === 'three' && isCab3DMode) {
-                            const touch = e.changedTouches[0];
-                            const rect = cabRenderer.domElement.getBoundingClientRect();
-                            cabMouse.x = ((touch.clientX - rect.left) / rect.width)*2 - 1; cabMouse.y = -((touch.clientY - rect.top) / rect.height)*2 + 1;
-                            cabRaycaster.setFromCamera(cabMouse, cabCamera);
-                            const shM = []; cabScene.traverse(c => { if (c.userData.type === 'shelf') shM.push(c); });
-                            const inter = cabRaycaster.intersectObjects(shM);
-                            if(inter.length > 0) { handleDropLogic(block, inter[0].object.userData.domElement.querySelector('.dropzone')); generateCab3D(); }
-                        } else if (activeDropzone && activeDropzone !== block.parentElement) {
-                            handleDropLogic(block, activeDropzone); if(isCab3DMode) generateCab3D();
-                        }
+                        if (activeDropzone && activeDropzone !== block.parentElement) { handleDropLogic(block, activeDropzone); if(isCab3DMode) generateCab3D(); }
                         draggedItem = null; activeDropzone = null; saveState();
                     }
                     if (isDoubleTap) { e.preventDefault(); e.stopPropagation(); openToyOptions(block); }
                 });
             });
 
-            // Dropzones
             document.querySelectorAll('.dropzone').forEach(dz => {
                 if (dz.dataset.bound === 'true') return; dz.dataset.bound = 'true';
                 const hTap = (e) => { if(e.target!==dz || dz.id==='staging-area') return; e.preventDefault(); e.stopPropagation(); openShelfOptions(dz.closest('.shelf-container')); };
@@ -883,7 +827,6 @@
                 });
             });
 
-            // Cabinets Header
             document.querySelectorAll('.cabinet-header').forEach(hdr => {
                 if (hdr.dataset.bound === 'true') return; hdr.dataset.bound = 'true';
                 const hTap = (e) => { e.preventDefault(); e.stopPropagation(); openCabinetOptions(hdr.closest('.cabinet-group')); };
@@ -906,10 +849,9 @@
             dz.appendChild(item);
         }
 
-        // Cabinet Edit Modals
+        // Cabinet Modals
         function openToyOptions(toy) {
-            activeObj = toy;
-            getEl('opt-toy-title').innerText = toy.getAttribute('data-name');
+            activeObj = toy; getEl('opt-toy-title').innerText = toy.getAttribute('data-name');
             getEl('opt-toy-w').innerText = toy.getAttribute('data-w'); getEl('opt-toy-h').innerText = toy.getAttribute('data-h'); getEl('opt-toy-d').innerText = toy.getAttribute('data-d')||toy.getAttribute('data-w');
             const delBtn = getEl('opt-toy-del-btn');
             if(activeObj.parentElement.id === 'staging-area') { delBtn.innerText = "✖ 永久刪除"; delBtn.classList.replace('bg-red-600', 'bg-red-800'); }
@@ -917,8 +859,7 @@
             openModal('toy-options-modal');
         }
         function triggerToyDelete() {
-            if(!activeObj) return;
-            const st = getEl('staging-area');
+            if(!activeObj) return; const st = getEl('staging-area');
             if (activeObj.parentElement === st) activeObj.remove(); else st.appendChild(activeObj);
             closeModal('toy-options-modal'); saveState(); if(isCab3DMode) generateCab3D();
         }
@@ -976,11 +917,9 @@
             if(currentMode === 'CABINET') exitCabinetMode(); else { saveState(); refreshScene(); }
         }
 
-        // --- Image Upload ---
         function triggerImageUpload(type) { uploadType = type; getEl('image-uploader').click(); }
         getEl('image-uploader').addEventListener('change', e => {
-            const file = e.target.files[0]; if(!file) return;
-            const reader = new FileReader();
+            const file = e.target.files[0]; if(!file) return; const reader = new FileReader();
             reader.onload = ev => {
                 const url = ev.target.result;
                 if(uploadType==='toy' && activeObj) { activeObj.style.backgroundImage=`url(${url})`; activeObj.setAttribute('data-img', url); const txt=activeObj.querySelector('.text-content'); if(txt)txt.style.opacity='0'; activeObj.style.backgroundColor='transparent'; closeModal('toy-options-modal'); }
@@ -992,13 +931,11 @@
             reader.readAsDataURL(file); e.target.value = '';
         });
 
-        // --- Drag Resize ---
-        let isRes = false, resTgt = null, resStartY = 0, resStartH = 0;
         window.startResizeShelf = (e, h) => { e.preventDefault(); e.stopPropagation(); isRes = true; resTgt = h.closest('.shelf-container'); resStartY = e.clientY||(e.touches&&e.touches[0].clientY); resStartH = parseFloat(resTgt.style.height); document.addEventListener('mousemove', doRes); document.addEventListener('mouseup', stopRes); document.addEventListener('touchmove', doRes, {passive:false}); document.addEventListener('touchend', stopRes); }
+        let isRes = false, resTgt = null, resStartY = 0, resStartH = 0;
         function doRes(e) { if(!isRes) return; e.preventDefault(); let nH = resStartH + (resStartY - (e.clientY||(e.touches&&e.touches[0].clientY))); const dz = resTgt.querySelector('.dropzone'); let mH=10; dz.querySelectorAll('.toy-block').forEach(t => mH=Math.max(mH, parseFloat(t.getAttribute('data-h')))); if(nH < mH*SCALE) nH = mH*SCALE; resTgt.style.height = nH+'px'; const cm = Math.round(nH/SCALE); dz.setAttribute('data-max-h', cm); resTgt.querySelector('.shelf-label').innerText = `${dz.getAttribute('data-name')} (高${cm})`; }
         function stopRes() { isRes = false; resTgt = null; document.removeEventListener('mousemove', doRes); document.removeEventListener('mouseup', stopRes); document.removeEventListener('touchmove', doRes); document.removeEventListener('touchend', stopRes); saveState(); if(isCab3DMode) generateCab3D(); }
 
-        // --- Creators ---
         function openAddShelf(id) { getEl('target-cabinet-id').value = id; openModal('add-shelf-modal'); }
         function createNewShelf() {
             const cab = getEl(getEl('target-cabinet-id').value), name = getEl('new-shelf-name').value||'新層板', h = parseFloat(getEl('new-shelf-h').value)||35, w = parseFloat(cab.getAttribute('data-w')), d = parseFloat(cab.getAttribute('data-d'));
@@ -1013,7 +950,7 @@
             rebindAllEvents(); closeModal('add-toy-modal'); saveState(); if(isCab3DMode) generateCab3D();
         }
 
-        // --- Cabinet 3D Engine (原版移植) ---
+        // Cabinet 3D Engine
         function generateCab3D() {
             const container = getEl('cab-three-container');
             if(!cabScene) {
@@ -1022,109 +959,31 @@
                 cabRenderer = new THREE.WebGLRenderer({ antialias: true }); cabRenderer.shadowMap.enabled = true;
                 container.appendChild(cabRenderer.domElement);
                 cabControls = new THREE.OrbitControls(cabCamera, cabRenderer.domElement); cabControls.target.set(0, 100, 0);
-                cabRaycaster = new THREE.Raycaster();
+                
                 cabScene.add(new THREE.AmbientLight(0xffffff, 0.7));
                 const dir = new THREE.DirectionalLight(0xffffff, 0.6); dir.position.set(200, 400, 200); dir.castShadow = true; cabScene.add(dir);
                 cabScene.add(new THREE.GridHelper(1000, 50, 0x555555, 0x333333));
-
-                function upPtr(e) { const r=cabRenderer.domElement.getBoundingClientRect(), cx=e.clientX||(e.touches&&e.touches[0]?e.touches[0].clientX:0), cy=e.clientY||(e.touches&&e.touches[0]?e.touches[0].clientY:0); if(cx===0&&cy===0)return; cabMouse.x=((cx-r.left)/r.width)*2-1; cabMouse.y=-((cy-r.top)/r.height)*2+1; }
-                cabRenderer.domElement.addEventListener('pointermove', upPtr); cabRenderer.domElement.addEventListener('touchmove', upPtr, {passive:true});
-
-                let lT=0, tS={x:0,y:0};
-                cabRenderer.domElement.addEventListener('pointerdown', e => tS={x:e.clientX,y:e.clientY});
-                cabRenderer.domElement.addEventListener('pointerup', e => {
-                    if(cabDragControls && cabDragControls._dragging) return;
-                    if(Math.abs(e.clientX-tS.x)>10 || Math.abs(e.clientY-tS.y)>10) return;
-                    const now=Date.now();
-                    if(now-lT<400) {
-                        e.preventDefault(); cabRaycaster.setFromCamera(cabMouse, cabCamera);
-                        const inters = cabRaycaster.intersectObjects(cabScene.children, true);
-                        if(inters.length>0) {
-                            for(let i=0;i<inters.length;i++) {
-                                const ud = inters[i].object.userData;
-                                if(ud&&ud.type) {
-                                    if(ud.type==='toy') openToyOptions(ud.dom); else if(ud.type==='shelf') openShelfOptions(ud.dom); else if(ud.type==='cabinet') openCabinetOptions(ud.dom); break;
-                                }
-                            }
-                        }
-                        lT=0;
-                    } else lT=now;
-                });
-                
-                cabRenderer.domElement.addEventListener('dragover', e=>e.preventDefault());
-                cabRenderer.domElement.addEventListener('drop', e=>{
-                    e.preventDefault(); if(!draggedItem) return;
-                    const r=cabRenderer.domElement.getBoundingClientRect(); cabMouse.x=((e.clientX-r.left)/r.width)*2-1; cabMouse.y=-((e.clientY-r.top)/r.height)*2+1;
-                    cabRaycaster.setFromCamera(cabMouse, cabCamera); const sM=[]; cabScene.traverse(c=>{if(c.userData.type==='shelf')sM.push(c);});
-                    const ints=cabRaycaster.intersectObjects(sM); if(ints.length>0) { handleDropLogic(draggedItem, ints[0].object.userData.dom.querySelector('.dropzone')); saveState(); generateCab3D(); }
-                });
-
                 function animCab() { cabReqAnim = requestAnimationFrame(animCab); if(currentMode === 'CABINET' && isCab3DMode) { cabControls.update(); cabRenderer.render(cabScene, cabCamera); } }
                 animCab();
             }
             
             cabRenderer.setSize(container.clientWidth, container.clientHeight); cabCamera.aspect=container.clientWidth/container.clientHeight; cabCamera.updateProjectionMatrix();
-            cabScene.children.filter(c=>c.type==='Group'||c.userData.type).forEach(c=>cabScene.remove(c)); cabDraggables=[];
+            cabScene.children.filter(c=>c.type==='Group').forEach(c=>cabScene.remove(c));
             
-            const texL = new THREE.TextureLoader();
             const cabEl = getEl(editingCabId);
             if(cabEl) {
-                const mesh = buildCabinetThreeMesh(cabEl, texL); mesh.position.set(0,0,0); mesh.rotation.y = 0; // 編輯模式置中
-                // 修改 UserData 讓雙擊可以吃到 DOM
-                mesh.userData = { type: 'cabinet', dom: cabEl };
-                mesh.children.forEach(c => {
-                    // Extract toys for dragging
-                    if(c.geometry.parameters.width < parseFloat(cabEl.getAttribute('data-w'))) {
-                        if(c.material.color.getHex() !== 0x8b5a2b) { cabDraggables.push(c); } // Is Toy
-                    }
-                });
-                
-                // Re-assign exact DOM refs
-                let curY = 2; const shelves = Array.from(cabEl.querySelectorAll('.shelf-container')).reverse();
-                let shIdx = 0;
-                mesh.children.forEach(c => {
-                    if(c.geometry.parameters.width === parseFloat(cabEl.getAttribute('data-w')) + 4) return; // Outer frame
-                    if(c.geometry.parameters.height > 10) return; // Side panels
-                    
-                    if(c.geometry.parameters.width === parseFloat(cabEl.getAttribute('data-w'))) {
-                        // Shelf
-                        if(shelves[shIdx]) { c.userData = { type: 'shelf', dom: shelves[shIdx] }; shIdx++; }
-                    } else {
-                        // Toy (brute force dom assignment based on position/color could be complex, we simplified it)
-                        // For a robust system, we inject DOM ID in buildCabinetThreeMesh.
-                    }
-                });
-                
+                const mesh = buildCabinetThreeMesh(cabEl, new THREE.TextureLoader()); mesh.position.set(0,0,0); mesh.rotation.y = 0;
                 cabScene.add(mesh);
             }
-
-            if(cabDragControls) cabDragControls.dispose();
-            cabDragControls = new THREE.DragControls(cabDraggables, cabCamera, cabRenderer.domElement);
-            let hlShelf = null;
-            cabDragControls.addEventListener('dragstart', e => { cabControls.enabled=false; e.object.material.transparent=true; e.object.material.opacity=0.6; e.object.material.emissive.setHex(0x444444); e.object._oy=e.object.position.y; });
-            cabDragControls.addEventListener('drag', e => {
-                e.object.position.y = e.object._oy; cabRaycaster.setFromCamera(cabMouse, cabCamera);
-                const sM=[]; cabScene.traverse(c=>{if(c.userData.type==='shelf')sM.push(c);}); const ints=cabRaycaster.intersectObjects(sM);
-                if(ints.length>0) { const t=ints[0].object; if(hlShelf!==t){ if(hlShelf)hlShelf.material.emissive.setHex(0x000000); hlShelf=t; hlShelf.material=hlShelf.material.clone(); hlShelf.material.emissive.setHex(0xaa6600); } }
-                else if(hlShelf){ hlShelf.material.emissive.setHex(0x000000); hlShelf=null; }
-            });
-            cabDragControls.addEventListener('dragend', e => {
-                cabControls.enabled=true; e.object.material.transparent=false; e.object.material.opacity=1.0; e.object.material.emissive.setHex(0x000000);
-                if(hlShelf) { hlShelf.material.emissive.setHex(0x000000); /* handleDropLogic(e.object.userData.dom, hlShelf.userData.dom.querySelector('.dropzone')); */ hlShelf=null; }
-                else { /* getEl('staging-area').appendChild(e.object.userData.dom); */ }
-                // Rebuild is necessary, but since we didn't firmly attach DOM to toys in the simplified mesh builder, 
-                // dragging in 3D cabinet mode is visual-only unless we complexify. We leave it as a visual playground or fallback to 2D for precision.
-                saveState(); generateCab3D();
-            });
         }
 
-        // --- 匯出功能 ---
+        // --- Export HTML ---
         function exportHTML() {
             const blob = new Blob([document.documentElement.outerHTML], { type: 'text/html' });
             const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Room_Planner_Ultimate.html'; a.click();
         }
 
-        // --- 初始化 54 件玩具與 3 大櫃體 ---
+        // --- 54 Toys Initialization ---
         function loadUltimateEdition() {
             if(!confirm('這將覆蓋目前的裝潢與櫃體配置，確定載入 54 件旗艦陣容？')) return;
             
@@ -1134,13 +993,13 @@
             roomObjects[1].z = -150; roomObjects[2].z = -150; roomObjects[2].rot = 90; roomObjects[2].x = -150;
 
             const rep = getEl('cabinet-repository');
-            function bCab(id, n, w, d) { const dV=document.createElement('div'); dV.innerHTML=buildCabinetHtml(id,n,w,d).trim(); rep.appendChild(dV.firstChild); return getEl(id); }
+            function bCab(id, n, w, d, posX) { const dV=document.createElement('div'); dV.innerHTML=buildCabinetHtml(id,n,w,d,posX).trim(); rep.appendChild(dV.firstChild); return getEl(id); }
             function bSh(cEl, n, w, h, d) { const dV=document.createElement('div'); dV.innerHTML=`<div class="shelf-container relative group border-b-[8px] border-[#8b5a2b]" style="height: ${h*SCALE}px; width: ${w*SCALE}px;"><div class="resize-handle" onmousedown="startResizeShelf(event, this)" ontouchstart="startResizeShelf(event, this)"></div><div class="shelf-label absolute -top-[18px] left-1 text-[10px] text-amber-500/70 font-bold z-10 pointer-events-none">${n} (高${h})</div><div class="dropzone shelf-bg w-full h-full" data-name="${n}" data-max-w="${w}" data-max-h="${h}" data-max-d="${d}"></div></div>`; cEl.querySelector('.shelf-list').prepend(dV.firstChild); return cEl.querySelector('.shelf-container:first-child .dropzone'); }
             function iToy(z, n, w, h, d, c) { const dV=document.createElement('div'); dV.innerHTML=`<div class="toy-block rounded-sm flex items-center justify-center font-bold text-black text-[10px] overflow-hidden shadow-md text-center select-none" style="width: ${w*SCALE}px; height: ${h*SCALE}px; background-color: ${c};" draggable="true" data-name="${n}" data-w="${w}" data-h="${h}" data-d="${d}" data-color="${c}"><span class="text-content truncate px-1 pointer-events-none">${n}</span></div>`; z.appendChild(dV.firstChild); }
 
             const C1="#8fbc8f", C2="#f08080", C3="#87cefa", C4="#dda0dd", C5="#ffb6c1", C6="#ffd700", C7="#d3d3d3", C8="#20b2aa";
 
-            const cL = bCab('cab_L', '左區櫃', 70, 24); cL.setAttribute('data-posx', -80);
+            const cL = bCab('cab_L', '左區櫃', 70, 24, -80);
             const L0 = bSh(cL, '底層', 70, 65, 24); iToy(L0, '巴斯超大', 33, 41, 20, C7); iToy(L0, '佐格', 25, 40, 19, C7);
             const L1 = bSh(cL, '第1層', 70, 35, 24); iToy(L1, 'ARAGORN', 20, 28, 17, C6); iToy(L1, 'LURTZ', 22, 25, 20, C6); iToy(L1, '戒靈', 11.5, 15, 11, C6);
             const L2 = bSh(cL, '第2層', 70, 35, 24); iToy(L2, '兔女郎', 10.5, 26, 10, C5); iToy(L2, '牛仔', 9.5, 22, 9, C5); iToy(L2, '桃子', 10, 24, 10, C5);
@@ -1148,7 +1007,7 @@
             const L4 = bSh(cL, '第4層', 70, 25, 24); iToy(L4, 'ELEVEN', 7, 14, 6, C4); iToy(L4, 'HELLFIRE', 7.5, 18, 3, C4); iToy(L4, 'DUSTIN', 7, 14, 6, C4); iToy(L4, 'ROCKSTAR', 10.5, 15, 10, C4); iToy(L4, 'VECNA', 8.5, 16, 7, C4); iToy(L4, 'DEMO', 11, 16, 11, C4);
             const L5 = bSh(cL, '第5層', 70, 20, 24); iToy(L5, '龍貓', 21, 7.7, 10, C1); iToy(L5, '小千', 21, 7.7, 10, C1);
 
-            const cM = bCab('cab_M', '中區櫃', 70, 24); cM.setAttribute('data-posx', 0);
+            const cM = bCab('cab_M', '中區櫃', 70, 24, 0);
             const M0 = bSh(cM, '底層', 70, 65, 24); iToy(M0, 'JOKER', 39, 50, 37, C2); iToy(M0, '魔多', 23.5, 46, 23, C6);
             const M1 = bSh(cM, '第1層', 70, 35, 24); iToy(M1, 'SARUMAN', 22, 25, 17, C6); iToy(M1, '烙印手', 15, 25, 14, C6); iToy(M1, '骷髏', 12, 20, 13, C6); iToy(M1, '巴風特', 14.6, 25, 12, C6);
             const M2 = bSh(cM, '第2層', 70, 35, 24); iToy(M2, '初音', 22, 22, 22, C3); iToy(M2, '涼宮', 9.5, 24, 9, C5); iToy(M2, '白雪', 9.5, 19, 9, C5);
@@ -1156,7 +1015,7 @@
             const M4 = bSh(cM, '第4層', 70, 25, 24); iToy(M4, 'SLIMER', 8, 16, 7, C4); iToy(M4, 'VENK', 9, 17, 8, C4); iToy(M4, 'EGON', 10.5, 17, 9, C4); iToy(M4, 'FACE', 13.5, 15, 7, C4);
             const M5 = bSh(cM, '第5層', 70, 20, 24); iToy(M5, 'Pickle', 7.6, 15, 5, C2); iToy(M5, 'P.sm', 6.4, 9, 6, C2); iToy(M5, '超人', 10, 16, 5, C2); iToy(M5, 'ELLO', 7.5, 11, 5, C2);
 
-            const cR = bCab('cab_R', '右區櫃', 70, 24); cR.setAttribute('data-posx', 80);
+            const cR = bCab('cab_R', '右區櫃', 70, 24, 80);
             const R0 = bSh(cR, '底層', 70, 65, 24); iToy(R0, 'JARETH', 30.5, 57, 30, C2); iToy(R0, '巴斯殼', 20, 39, 20, C7);
             const R1 = bSh(cR, '第1層', 70, 35, 24); iToy(R1, '戴歐', 12.7, 27, 11, C7); iToy(R1, '阿芙', 8.9, 15, 8, C7);
             const R2 = bSh(cR, '第2層', 70, 35, 24); iToy(R2, 'Gantz', 10, 25, 10, C3); iToy(R2, '狼香料', 14, 24, 14, C3);
@@ -1166,7 +1025,7 @@
 
             rebindAllEvents();
             saveState(); refreshScene();
-            toggleSidebar();
+            toggleSidebar(); // 收合選單
         }
 
         window.onload = () => {
